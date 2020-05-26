@@ -1,0 +1,349 @@
+<html>
+<head>
+<script>
+var canvas;
+var gl;
+
+function start_gl() {
+	canvas = window.document.getElementById("wglcanvas");
+	gl = canvas.getContext("experimental-webgl");
+}
+
+function update_gl() {
+	canvas.height = canvas.clientHeight;
+	canvas.width = canvas.clientWidth;
+	gl.viewport(0,0,canvas.width,canvas.height);
+}
+
+function Grid() {
+
+	this.vbo = gl.createBuffer();
+	this.program = gl.createProgram();
+	
+	var vs = gl.createShader(gl.VERTEX_SHADER);
+	gl.shaderSource(vs, 
+		'precision highp float;\n' +
+		'attribute vec2 pos;\n' +
+		'uniform vec4 transform;\n' +
+		'uniform float zoom;\n' +
+		'varying vec2 real_pos;\n' +
+		'void main() {\n' +
+		'	gl_Position = vec4(pos, 0.0, 1.0);\n' +
+		'	real_pos = pos*transform.zw*0.5*zoom+transform.xy;\n' +
+		'}\n'
+	);
+	gl.compileShader(vs);
+	console.log(gl.getShaderInfoLog(vs));
+	gl.attachShader(this.program, vs);
+	gl.deleteShader(vs);
+	
+	var fs = gl.createShader(gl.FRAGMENT_SHADER);
+	gl.shaderSource(fs,
+		'precision highp float;\n' +
+		'varying vec2 real_pos;\n' +
+		'uniform float zoom;\n' +
+		'void main() {\n' +
+		'	vec2 p_0 = -2.0*abs(fract(real_pos*1.0+0.5)-0.5)+zoom*1.01;\n' +
+		'	vec2 p_1 = -2.0*abs(fract(real_pos*0.1+0.5)-0.5)+zoom*0.101;\n' +
+		'	vec2 p_2 = -2.0*abs(fract(real_pos*0.01+0.5)-0.5)+zoom*0.0101;\n' +
+		'	vec2 p_3 = -2.0*abs(fract(real_pos*0.001+0.5)-0.5)+zoom*0.00101;\n' +
+		'	float zoom_log = log(zoom) / log(0.1);\n' +
+		'	vec4 verteilung = clamp(vec4(zoom_log,zoom_log+1.0,zoom_log+2.0,zoom_log+3.0), 0.0, 1.0) * 0.25;\n' +
+		
+		'	float c = 0.0;\n' +
+		'	if(max(p_0.x, p_0.y) >= 0.0) c = c + verteilung.x;\n' +
+		'	if(max(p_1.x, p_1.y) >= 0.0) c = c + verteilung.y;\n' +
+		'	if(max(p_2.x, p_2.y) >= 0.0) c = c + verteilung.z;\n' +
+		'	if(max(p_3.x, p_3.y) >= 0.0) c = c + verteilung.w;\n' +
+		
+		'	gl_FragColor = vec4(c, c, c, 1.0);\n' +
+		'}\n'
+	);
+	gl.compileShader(fs);
+	console.log(gl.getShaderInfoLog(fs));
+	gl.attachShader(this.program, fs);
+	gl.deleteShader(fs);
+	
+	gl.linkProgram(this.program);
+	this.pos_loc = gl.getAttribLocation(this.program, "pos");
+	this.transform_loc = gl.getUniformLocation(this.program, "transform");
+	this.zoom_loc = gl.getUniformLocation(this.program, "zoom");
+		
+	gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+	var vertices = new Float32Array([ 
+		-1, -1,
+		1, -1,
+		-1, 1,
+		1, 1,
+	]);
+	gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+	
+	this.show = function (x, y, width, height, zoom) {
+		gl.useProgram(this.program);
+		
+		gl.uniform1f(this.zoom_loc, zoom);
+		gl.uniform4f(this.transform_loc, x, y, width, height);
+		
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo)
+		gl.vertexAttribPointer(this.pos_loc, 2, gl.FLOAT, false, 0, 0);
+		gl.enableVertexAttribArray(this.pos_loc);
+	
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+	
+		gl.disableVertexAttribArray(this.pos_loc);
+	}
+}
+
+function Beam() {
+	this.points = [0,0];
+	this.beams = [];
+	
+	this.vbo = gl.createBuffer();
+	this.ibo = gl.createBuffer();
+	this.program = gl.createProgram();
+	
+	var vs = gl.createShader(gl.VERTEX_SHADER);
+	gl.shaderSource(vs, 
+		'precision highp float;\n' +
+		'attribute vec2 pos;\n' +
+		'uniform vec4 transform;\n' +
+		'uniform float zoom;\n' +
+		'void main() {\n' +
+		'	gl_Position = vec4((pos-transform.xy) / (zoom*transform.zw*0.5), 0.0, 1.0);\n' +
+		'}\n'
+	);
+	gl.compileShader(vs);
+	console.log(gl.getShaderInfoLog(vs));
+	gl.attachShader(this.program, vs);
+	gl.deleteShader(vs);
+	
+	var fs = gl.createShader(gl.FRAGMENT_SHADER);
+	gl.shaderSource(fs,
+		'precision highp float;\n' +
+		'void main() {\n' +
+		'	gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);\n' +
+		'}\n'
+	);
+	gl.compileShader(fs);
+	console.log(gl.getShaderInfoLog(fs));
+	gl.attachShader(this.program, fs);
+	gl.deleteShader(fs);
+	
+	gl.linkProgram(this.program);
+	this.pos_loc = gl.getAttribLocation(this.program, "pos");
+	this.transform_loc = gl.getUniformLocation(this.program, "transform");
+	this.zoom_loc = gl.getUniformLocation(this.program, "zoom");
+	
+	gl.lineWidth(2);
+	
+	this.update = function () {
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.points), gl.STATIC_DRAW);
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Int16Array(this.beams), gl.STATIC_DRAW);
+	}
+	this.update();
+		
+	this.show = function (x, y, width, height, zoom) {
+	
+		gl.useProgram(this.program);
+		
+		gl.uniform1f(this.zoom_loc, zoom);
+		gl.uniform4f(this.transform_loc, x, y, width, height);
+		
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo)
+		gl.vertexAttribPointer(this.pos_loc, 2, gl.FLOAT, false, 0, 0);
+		gl.enableVertexAttribArray(this.pos_loc);
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo)
+	
+		gl.drawElements(gl.LINES, this.beams.length, gl.UNSIGNED_SHORT, 0);
+		
+		gl.disableVertexAttribArray(this.pos_loc);
+	}
+	
+}
+
+var grid;
+var beam;
+
+var x = 0.0;
+var y = 0.0;
+var zoom = 0.1;
+
+function update() {
+	grid.show(x, y, canvas.width, canvas.height, zoom);
+	beam.show(x, y, canvas.width, canvas.height, zoom);
+}
+
+var last_mouse_down_x;
+var last_mouse_down_y;
+var right_mouse_is_down = false;
+
+window.onload = function () {
+	start_gl();
+	update_gl();
+	grid = new Grid();
+	beam = new Beam();
+	update();
+	
+	function calc_mouse_pos(event) {
+		return {
+			'x': Math.round((event.pageX-canvas.width/2)*zoom + x),
+			'y': Math.round(-(event.pageY-canvas.height/2)*zoom + y)
+		};
+	}
+
+	canvas.onmousedown = function (event) {
+		if(event.button == 2) {
+			last_mouse_down_x = event.pageX;
+			last_mouse_down_y = event.pageY;
+			right_mouse_is_down = true;
+		}
+	}
+	
+	var last_point = 0;
+	var started = false;
+	
+	canvas.onclick = function (event) {
+		if(event.button == 0) {
+			var pos = calc_mouse_pos(event);
+			var cur_point = 0;
+			
+			for(var x=2; x<beam.points.length + 2; x+=2){
+				cur_point = x/2;
+				
+				if(x == beam.points.length) {
+					beam.points = beam.points.concat([pos.x, pos.y]);
+					break;
+				}
+			
+				if(beam.points[x] == pos.x && beam.points[x+1] == pos.y) {
+					break;
+				}
+			}
+			
+			if(started && last_point != cur_point) {
+				var already_present = false;
+				for(var x=0; x<beam.beams.length-2; x+=2) {
+					if((beam.beams[x] == last_point && beam.beams[x+1] == cur_point)
+					|| (beam.beams[x+1] == last_point && beam.beams[x] == cur_point)) {
+						already_present = true;
+					}
+				}
+				if(already_present) {
+					beam.beams[beam.beams.length-2] = cur_point;
+					beam.update();
+					update();
+				} else {
+					beam.beams[beam.beams.length-1] = cur_point;
+					beam.update();
+					update();
+					started = false;
+				}
+			} 
+			
+			if(!started){
+				beam.beams = beam.beams.concat([cur_point, 0]);
+				beam.points[0] = pos.x;
+				beam.points[1] = pos.y;
+				beam.update();
+				update();
+				started = true;
+			}
+			last_point = cur_point;
+		}
+	}
+	
+	canvas.onmouseup = function (event) {
+		if(event.button == 2) {
+			right_mouse_is_down = false;
+		}
+	}
+	
+	canvas.onmousemove = function (event) {
+		if(right_mouse_is_down) {
+			x -= zoom * (event.pageX - last_mouse_down_x);
+			y += zoom * (event.pageY - last_mouse_down_y);
+			last_mouse_down_x = event.pageX;
+			last_mouse_down_y = event.pageY;
+			update();
+		}
+		
+		if(started) {
+			var pos = calc_mouse_pos(event);
+			beam.points[0] = pos.x;
+			beam.points[1] = pos.y;
+			beam.update();
+			update();
+		}
+	}
+	
+	canvas.onmousewheel = function (event) {
+		if(event.wheelDelta > 0) {
+			x -= (event.pageX-canvas.width/2)*zoom*0.125;
+			y += (event.pageY-canvas.height/2)*zoom*0.125;
+			zoom *= 1.125;
+		} else {
+			zoom /= 1.125;
+			x += (event.pageX-canvas.width/2)*zoom*0.125;
+			y -= (event.pageY-canvas.height/2)*zoom*0.125;
+		}
+		
+		update();
+		return false; // don't scroll
+	}
+	
+	window.onkeydown = function (event) {
+		switch(event.keyCode) {
+		case 27: // esc
+			if(started) {
+				beam.beams.pop();
+				beam.beams.pop();
+				beam.update();
+				update();
+				started = false;
+			}
+			break;
+		case 37: // left
+			x -= 10*zoom;
+			break;
+		case 38: // up
+			y += 10*zoom;
+			break;
+		case 39: // right
+			x += 10*zoom;
+			break;
+		case 40: // down
+			y -= 10*zoom;
+			break;
+		case 187: // +
+		case 171:
+			zoom /= 1.125;
+			break;
+		case 189: // -
+		case 173:
+			zoom *= 1.125;
+			break;
+		default:
+			console.log(event);
+			return true;
+		}
+		update();
+		return false; // don't handle known keys
+	}
+	
+	canvas.oncontextmenu = function () {
+		return false; // disable contextmenu
+	}
+	
+	window.onresize = function() {
+		update_gl();
+		update();
+	}
+}
+</script>
+</head>
+<body style="margin:0px">
+<canvas id="wglcanvas" style="width:100%;height:100%;margin0px"></canvas>
+</body>
+</html>
