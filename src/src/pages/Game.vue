@@ -18,8 +18,8 @@
 </template>
 
 <script>
-import Grid from 'components/utils/Grid'
-import Beam from 'components/utils/Beam'
+import Grid from 'assets/utils/Grid'
+import Beam from 'assets/utils/Beam'
 
 export default {
   name: 'Game',
